@@ -18,6 +18,7 @@ import java.util.List;
 import javax.swing.JButton;
 import java.awt.geom.AffineTransform;
 import java.awt.Graphics2D;
+import java.util.Random;
 
 public class GamePanel extends JPanel implements KeyListener, ActionListener {
     private static final int PANEL_WIDTH = 800;
@@ -27,15 +28,21 @@ public class GamePanel extends JPanel implements KeyListener, ActionListener {
     private static final int INVADER_ROWS = 5;
     private static final int INVADER_COLUMNS = 12;
     private static final int INVADER_GAP = 10;
-
+    private static final int INVADER_SPEED = 2;
+    private static final int INVADER_BOUNDARY_PADDING = 10;
     private Spaceship spaceship;
     private List<Bullet> bullets;
     private List<Invader> invaders;
+    private List<InvaderBullet> invaderBullets;
+    private static final int INVADER_SHOOT_PROBABILITY = 1000; // Adjust this to control frequency of shooting
+    private Random random;
     private boolean isSpacePressed;
     private boolean isGameOver;
+    private boolean isVictory;
     private JButton resetButton;
     private Image spaceshipImage;
-
+    private static final long FIRE_DELAY = 200; // Delay in milliseconds
+    private long lastFireTime;
     public GamePanel() {
         setPreferredSize(new Dimension(PANEL_WIDTH, PANEL_HEIGHT));
         setFocusable(true);
@@ -45,6 +52,10 @@ public class GamePanel extends JPanel implements KeyListener, ActionListener {
         bullets = new ArrayList<>();
         initializeInvaders();
         isGameOver = false;
+        isVictory = false;
+        invaderBullets = new ArrayList<>();
+        random = new Random();
+        lastFireTime = 0;
 
         resetButton = new JButton("Reset");
         resetButton.setBounds(PANEL_WIDTH / 2 - 50, PANEL_HEIGHT / 2 + 50, 100, 30);
@@ -92,12 +103,30 @@ public class GamePanel extends JPanel implements KeyListener, ActionListener {
         }
 
         // Update spaceship position
-        if (spaceship.isMovingLeft()) {
+        if (spaceship.isMovingLeft() && spaceship.getX() > 0) {
             spaceship.setX(spaceship.getX() - SPACESHIP_SPEED);
-        } else if (spaceship.isMovingRight()) {
+        } else if (spaceship.isMovingRight() && spaceship.getX() + spaceship.getWidth() < PANEL_WIDTH) {
             spaceship.setX(spaceship.getX() + SPACESHIP_SPEED);
         }
 
+        boolean changeDirection = false;
+        for (Invader invader : invaders) {
+            invader.move();
+            if (invader.getX() < INVADER_BOUNDARY_PADDING && invader.getDirection() == -1 ||
+                    invader.getX() > PANEL_WIDTH - invader.getWidth() - INVADER_BOUNDARY_PADDING && invader.getDirection() == 1) {
+                changeDirection = true;
+            }
+            if (spaceship.getBounds().intersects(invader.getBounds())) {
+                isGameOver = true;
+                resetButton.setVisible(true);
+                break;
+            }
+        }
+        if (changeDirection) {
+            for (Invader invader : invaders) {
+                invader.changeDirection();
+            }
+        }
         // Update bullet positions
         for (Iterator<Bullet> iterator = bullets.iterator(); iterator.hasNext();) {
             Bullet bullet = iterator.next();
@@ -123,6 +152,7 @@ public class GamePanel extends JPanel implements KeyListener, ActionListener {
         // Check if all invaders have been eliminated
         if (invaders.isEmpty()) {
             isGameOver = true;
+            isVictory = true;
             resetButton.setVisible(true);
         }
 
@@ -135,15 +165,43 @@ public class GamePanel extends JPanel implements KeyListener, ActionListener {
                 break;
             }
         }
+        // Update invader bullets positions and check for collisions
+        for (Iterator<InvaderBullet> iterator = invaderBullets.iterator(); iterator.hasNext();) {
+            InvaderBullet invaderBullet = iterator.next();
+            invaderBullet.move();
+
+            // Check if the bullet is out of bounds
+            if (invaderBullet.getY() > PANEL_HEIGHT) {
+                iterator.remove();
+            } else {
+                // Check for collision between invader bullet and spaceship
+                if (invaderBullet.getBounds().intersects(spaceship.getBounds())) {
+                    // Handle collision logic
+                    isGameOver = true;
+                    resetButton.setVisible(true);
+                    break;
+                }
+            }
+        }
+
+        // Invaders shoot randomly
+        for (Invader invader : invaders) {
+            if (random.nextInt(INVADER_SHOOT_PROBABILITY) == 0) {
+                invaderBullets.add(new InvaderBullet(invader.getX() + invader.getWidth() / 2, invader.getY() + invader.getHeight()));
+            }
+        }
     }
 
-    @Override
     protected void paintComponent(Graphics g) {
         super.paintComponent(g);
         drawGame(g);
 
         if (isGameOver) {
-            drawGameOver(g);
+            if (isVictory) {
+                drawVictory(g);
+            } else {
+                drawGameOver(g);
+            }
         }
     }
 
@@ -164,7 +222,11 @@ public class GamePanel extends JPanel implements KeyListener, ActionListener {
         for (Bullet bullet : bullets) {
             g.fillRect(bullet.getX(), bullet.getY(), bullet.getWidth(), bullet.getHeight());
         }
-
+        // Draw invader bullets
+        g.setColor(Color.YELLOW);
+        for (InvaderBullet invaderBullet : invaderBullets) {
+            g.fillRect(invaderBullet.getX(), invaderBullet.getY(), invaderBullet.getWidth(), invaderBullet.getHeight());
+        }
         // Draw invaders
         g.setColor(Color.BLUE);
         for (Invader invader : invaders) {
@@ -181,25 +243,44 @@ public class GamePanel extends JPanel implements KeyListener, ActionListener {
         int y = PANEL_HEIGHT / 2;
         g.drawString(gameOverText, x, y);
     }
-
+    private void drawVictory(Graphics g) {
+        g.setColor(Color.GREEN);
+        g.setFont(new Font("Arial", Font.BOLD, 48));
+        String victoryText = "Slava Ukraini!";
+        int textWidth = g.getFontMetrics().stringWidth(victoryText);
+        int x = (PANEL_WIDTH - textWidth) / 2;
+        int y = PANEL_HEIGHT / 2;
+        g.drawString(victoryText, x, y);
+    }
     @Override
     public void keyPressed(KeyEvent e) {
         int keyCode = e.getKeyCode();
 
-        if (keyCode == KeyEvent.VK_LEFT) {
-            spaceship.setMovingLeft(true);
-        } else if (keyCode == KeyEvent.VK_RIGHT) {
-            spaceship.setMovingRight(true);
-        } else if (keyCode == KeyEvent.VK_SPACE) {
-            if (!isGameOver && !isSpacePressed) {
+        // Handle shooting
+        if (keyCode == KeyEvent.VK_SPACE) {
+            long currentTime = System.currentTimeMillis();
+            if (!isGameOver && currentTime - lastFireTime >= FIRE_DELAY) {
                 isSpacePressed = true;
                 Bullet bullet = new Bullet();
                 bullet.setX(spaceship.getX() + spaceship.getWidth() / 2 - bullet.getWidth() / 2);
                 bullet.setY(spaceship.getY() - bullet.getHeight());
                 bullets.add(bullet);
+                lastFireTime = currentTime;
+            } else if (isGameOver || isVictory) {
+                resetGame();
+            }
+        }
+
+        // The game is not over and it is not victory, handle spaceship movement
+        if (!isGameOver && !isVictory) {
+            if (keyCode == KeyEvent.VK_LEFT) {
+                spaceship.setMovingLeft(true);
+            } else if (keyCode == KeyEvent.VK_RIGHT) {
+                spaceship.setMovingRight(true);
             }
         }
     }
+
 
     @Override
     public void keyReleased(KeyEvent e) {
@@ -229,8 +310,10 @@ public class GamePanel extends JPanel implements KeyListener, ActionListener {
     private void resetGame() {
         spaceship = new Spaceship();
         bullets.clear();
+        invaderBullets.clear();
         initializeInvaders();
         isGameOver = false;
+        isVictory = false;
         resetButton.setVisible(false);
         requestFocusInWindow();
     }
